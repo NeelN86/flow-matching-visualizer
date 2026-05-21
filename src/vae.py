@@ -89,6 +89,17 @@ def vae_loss(recon: Tensor, x: Tensor, mu: Tensor, logvar: Tensor) -> Tensor:
     return bce + kld
 
 
+def _load_mnist_tensor(data_root: str = "data") -> Tensor:
+    """Download MNIST once and return all 60k images as a float32 tensor [60000, 1, 28, 28].
+
+    Pre-loading into RAM and sampling with randint is ~10x faster than
+    iterating a DataLoader on cold disk (avoids per-batch file I/O).
+    """
+    dataset = datasets.MNIST(data_root, train=True, download=True, transform=transforms.ToTensor())
+    # Stack into one tensor — fits in ~188 MB RAM as float32.
+    return torch.stack([img for img, _ in dataset])   # [60000, 1, 28, 28]
+
+
 def train_vae(
     epochs: int = 15,
     batch_size: int = 256,
@@ -98,11 +109,15 @@ def train_vae(
 ) -> tuple[VAE, list[float]]:
     """Train the VAE on MNIST and return (model, per-epoch loss history).
 
+    Pre-loads all images into a single tensor and samples minibatches with
+    randint — same pattern as the toy training loop and ~10x faster on CPU
+    than iterating a DataLoader from disk.
+
     Saves checkpoint to checkpoints/vae.pt after training.
     """
-    transform = transforms.ToTensor()
-    dataset = datasets.MNIST(data_root, train=True, download=True, transform=transform)
-    loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    all_imgs = _load_mnist_tensor(data_root)   # one-time cost
+    n = all_imgs.shape[0]
+    steps_per_epoch = n // batch_size
 
     model = VAE()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -111,7 +126,10 @@ def train_vae(
     model.train()
     for epoch in range(epochs):
         epoch_loss = 0.0
-        for imgs, _ in loader:
+        for _ in range(steps_per_epoch):
+            idx  = torch.randint(0, n, (batch_size,))
+            imgs = all_imgs[idx]
+
             optimizer.zero_grad()
             recon, mu, logvar = model(imgs)
             loss = vae_loss(recon, imgs, mu, logvar)
@@ -119,7 +137,7 @@ def train_vae(
             optimizer.step()
             epoch_loss += loss.item()
 
-        avg = epoch_loss / len(loader)
+        avg = epoch_loss / steps_per_epoch
         loss_history.append(avg)
 
         if progress_cb is not None:

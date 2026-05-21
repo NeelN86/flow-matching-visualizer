@@ -138,36 +138,36 @@ def run_solver_comparison(n_particles: int, n_steps: int) -> plt.Figure | None:
 # ---------------------------------------------------------------------------
 
 def train_vae_handler(epochs: int, batch_size: int, lr: float):
-    """Generator: trains the VAE and streams per-epoch loss."""
-    losses: list[float] = []
+    """Generator: trains the VAE and streams per-epoch loss.
 
-    def cb(epoch: int, loss: float) -> None:
-        losses.append(loss)
+    Pre-loads all MNIST images into a single tensor, then samples minibatches
+    with randint — avoids per-batch DataLoader disk I/O and is ~10x faster.
+    """
+    from src.vae import vae_loss, _load_mnist_tensor
 
-    # Run training eagerly (yields updates after completion of each epoch via
-    # the progress callback). We batch-train epoch-by-epoch so we can yield.
-    from torchvision import datasets, transforms
-    from torch.utils.data import DataLoader
-    from src.vae import vae_loss
-
-    transform = transforms.ToTensor()
-    dataset = datasets.MNIST("data", train=True, download=True, transform=transform)
-    loader  = DataLoader(dataset, batch_size=int(batch_size), shuffle=True, drop_last=True)
+    yield None, "Loading MNIST into memory..."
+    all_imgs = _load_mnist_tensor("data")
+    n = all_imgs.shape[0]
+    bs = int(batch_size)
+    steps_per_epoch = n // bs
 
     model = VAE()
     optimizer = torch.optim.Adam(model.parameters(), lr=float(lr))
+    losses: list[float] = []
 
     model.train()
     for epoch in range(int(epochs)):
         epoch_loss = 0.0
-        for imgs, _ in loader:
+        for _ in range(steps_per_epoch):
+            idx  = torch.randint(0, n, (bs,))
+            imgs = all_imgs[idx]
             optimizer.zero_grad()
             recon, mu, logvar = model(imgs)
             loss = vae_loss(recon, imgs, mu, logvar)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-        avg = epoch_loss / len(loader)
+        avg = epoch_loss / steps_per_epoch
         losses.append(avg)
         fig = _loss_fig(losses, title="VAE training loss (per epoch)")
         yield fig, f"Epoch {epoch + 1}/{int(epochs)}  loss={avg:.1f}"
