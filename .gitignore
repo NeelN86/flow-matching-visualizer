@@ -26,6 +26,9 @@ outputs/
 *.pt
 *.pth
 
+# Keep README demo assets
+!assets/*.gif
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb

@@ -43,6 +43,8 @@ At inference time, integrating **dx/dt = v_θ(x, t)** from t = 0 to t = 1 transp
 - Animate particles flowing through the field with fading trails, exported as a GIF
 - Side-by-side Euler vs. RK4 solver comparison at low step counts (RK4 is ~34× more accurate at 15 steps)
 
+![Toy flow animation — Gaussian noise transported to two_moons](assets/toy_flow.gif)
+
 ### Tab 2 — MNIST latent flow matching
 
 - Train a **convolutional VAE** with a 2D bottleneck on MNIST — the entire digit dataset collapses into a 2D latent space where classes cluster by digit
@@ -51,6 +53,8 @@ At inference time, integrating **dx/dt = v_θ(x, t)** from t = 0 to t = 1 transp
 - **Decoded output panel**: integrates particles in latent space and decodes their final positions back to 28×28 pixel images using the VAE decoder
 
 The key design decision is working in **2D latent space rather than pixel space** — this keeps the velocity field visualization exact (not PCA-approximated) while still producing real digit images.
+
+![MNIST latent flow — noise transported to digit-3 cluster](assets/mnist_flow.gif)
 
 ---
 
