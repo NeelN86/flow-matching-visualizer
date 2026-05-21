@@ -11,17 +11,20 @@ At every step we:
 
 No data loader is needed — distributions are sampled on the fly each step,
 so the effective dataset is infinite.
+
+For class-conditioned training (class_label set), x1 is sampled from a
+pre-built MNIST latent pool and the class index is fed as an embedding.
 """
 
 from __future__ import annotations
 
-import time
 from typing import Callable
 
 import torch
+import torch.nn.functional as F
 
 from src.data import TARGETS, sample_source
-from src.interpolation import flow_matching_loss
+from src.interpolation import interpolate, target_velocity
 from src.model import VelocityMLP
 
 
@@ -31,37 +34,56 @@ def train(
     batch_size: int = 256,
     lr: float = 1e-3,
     progress_cb: Callable[[int, float], None] | None = None,
+    # --- class-conditioned MNIST flow matching ---
+    class_label: int | None = None,
+    mnist_sampler: Callable[[int], torch.Tensor] | None = None,
 ) -> tuple[VelocityMLP, list[float]]:
     """Train a VelocityMLP via flow matching.
 
     Args:
-        target_name:  Key into TARGETS registry ("two_moons", "gaussian_mixture",
-                      "checkerboard").
-        steps:        Number of gradient steps.
-        batch_size:   Samples drawn per step from both source and target.
-        lr:           Adam learning rate.
-        progress_cb:  Optional callback(step, loss) called every step. Useful
-                      for streaming live loss to a Gradio component.
+        target_name:    Key into TARGETS registry. Ignored when class_label is set.
+        steps:          Number of gradient steps.
+        batch_size:     Samples drawn per step.
+        lr:             Adam learning rate.
+        progress_cb:    Optional callback(step, loss) called every step.
+        class_label:    Digit class (0-9) for class-conditioned MNIST flow matching.
+                        When set, mnist_sampler must also be provided.
+        mnist_sampler:  Pre-built sampler from make_mnist_class_sampler(); required
+                        when class_label is not None.
 
     Returns:
         (model, loss_history) where loss_history[i] is the scalar loss at step i.
     """
-    if target_name not in TARGETS:
-        raise ValueError(f"Unknown target '{target_name}'. Choose from {list(TARGETS)}")
+    conditioned = class_label is not None
 
-    target_sampler = TARGETS[target_name]
-    model = VelocityMLP()
+    if conditioned:
+        if mnist_sampler is None:
+            raise ValueError("mnist_sampler is required when class_label is set.")
+        target_sampler = mnist_sampler
+        model = VelocityMLP(n_classes=10)
+        c_tensor = torch.full((batch_size,), class_label, dtype=torch.long)
+    else:
+        if target_name not in TARGETS:
+            raise ValueError(f"Unknown target '{target_name}'. Choose from {list(TARGETS)}")
+        target_sampler = TARGETS[target_name]
+        model = VelocityMLP()
+        c_tensor = None
+
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_history: list[float] = []
 
     model.train()
     for step in range(steps):
-        x0 = sample_source(batch_size)              # noise samples
-        x1 = target_sampler(batch_size)             # target samples
-        t = torch.rand(batch_size)                  # t ~ U[0, 1]
+        x0 = sample_source(batch_size)
+        x1 = target_sampler(batch_size)
+        t  = torch.rand(batch_size)
+
+        x_t      = interpolate(x0, x1, t)
+        v_target = target_velocity(x0, x1)
+        v_pred   = model(x_t, t, c_tensor)
+        loss     = F.mse_loss(v_pred, v_target)
 
         optimizer.zero_grad()
-        loss = flow_matching_loss(model, x0, x1, t)
         loss.backward()
         optimizer.step()
 

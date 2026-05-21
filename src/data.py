@@ -72,3 +72,36 @@ TARGETS: dict[str, Callable[[int], Tensor]] = {
     "gaussian_mixture": sample_gaussian_mixture,
     "checkerboard": sample_checkerboard,
 }
+
+
+def make_mnist_class_sampler(vae: "VAE", digit: int, data_root: str = "data") -> Callable[[int], Tensor]:  # type: ignore[name-defined]
+    """Pre-encode all MNIST training images for a given digit into 2D latents.
+
+    Returns a sampler f(n) -> Tensor[n, 2] that draws random rows from
+    that pre-encoded pool — used as the flow-matching target distribution.
+    The VAE is required at call time (not import time), so this never
+    pollutes the TARGETS registry with a model dependency.
+    """
+    from torchvision import datasets, transforms
+    from torch.utils.data import DataLoader
+
+    transform = transforms.ToTensor()
+    dataset = datasets.MNIST(data_root, train=True, download=True, transform=transform)
+    loader  = DataLoader(dataset, batch_size=512, shuffle=False)
+
+    latents: list[Tensor] = []
+    vae.eval()
+    with torch.no_grad():
+        for imgs, labels in loader:
+            mask = labels == digit
+            if mask.any():
+                mu, _ = vae.encode(imgs[mask])
+                latents.append(mu)
+
+    pool = torch.cat(latents)  # [N_digit, 2]
+
+    def sampler(n: int) -> Tensor:
+        idx = torch.randint(0, pool.shape[0], (n,))
+        return pool[idx]
+
+    return sampler

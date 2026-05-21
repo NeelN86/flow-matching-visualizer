@@ -38,3 +38,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Claude Code
+.claude/
+
+# MNIST dataset download
+data/

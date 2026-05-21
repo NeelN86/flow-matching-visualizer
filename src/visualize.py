@@ -24,6 +24,12 @@ from torch import Tensor
 from src.model import VelocityMLP
 from src.solvers import euler_integrate, rk4_integrate, velocity_field_on_grid
 
+# VAE import is optional — only needed for render_decoded_panel.
+try:
+    from src.vae import VAE as _VAE
+except ImportError:
+    _VAE = None  # type: ignore[assignment,misc]
+
 
 def render_static_quiver(
     model: VelocityMLP,
@@ -199,6 +205,97 @@ def animate_flow(
     plt.close(fig)
 
     return os.path.abspath(out_path)
+
+
+def render_decoded_panel(
+    model: VelocityMLP,
+    vae: "_VAE",
+    x0: Tensor,
+    n_steps: int = 100,
+    n_show: int = 9,
+    class_label: int | None = None,
+    bounds: tuple[float, float, float, float] = (-4.0, 4.0, -4.0, 4.0),
+    res: int = 20,
+    c_tensor: Tensor | None = None,
+) -> plt.Figure:
+    """Two-panel figure: quiver field (left) + decoded MNIST images (right).
+
+    Integrates n_show particles from x0, decodes their final latent positions
+    with the VAE decoder, and shows a grid of reconstructed 28×28 images.
+
+    Args:
+        model:       Trained class-conditioned VelocityMLP.
+        vae:         Trained VAE for decoding latent → pixel.
+        x0:          [B, 2] initial noise positions.
+        n_steps:     ODE integration steps.
+        n_show:      How many decoded images to show (≤ B, arranged in a grid).
+        class_label: Digit class, shown in the title.
+        bounds:      Quiver field plot region.
+        res:         Quiver grid resolution.
+        c_tensor:    [B] class label tensor for the flow model.
+
+    Returns:
+        matplotlib Figure with two panels.
+    """
+    model.eval()
+    vae.eval()
+
+    # Integrate — use a wrapper that binds c_tensor if provided.
+    if c_tensor is not None:
+        class CWrapper(torch.nn.Module):
+            def __init__(self, m: VelocityMLP, c: Tensor) -> None:
+                super().__init__()
+                self._m = m
+                self._c = c
+            def forward(self, x: Tensor, t: Tensor) -> Tensor:
+                return self._m(x, t, self._c[:x.shape[0]])
+        wrapped = CWrapper(model, c_tensor)
+    else:
+        wrapped = model  # type: ignore[assignment]
+
+    with torch.no_grad():
+        traj = euler_integrate(wrapped, x0, n_steps=n_steps)  # [n_steps+1, B, 2]
+        z_final = traj[-1, :n_show]                           # [n_show, 2]
+        decoded = vae.decode(z_final)                         # [n_show, 1, 28, 28]
+
+    # --- Figure layout --------------------------------------------------------
+    grid_side = int(np.ceil(np.sqrt(n_show)))
+    fig = plt.figure(figsize=(13, 6))
+    fig.patch.set_facecolor("#111111")
+
+    # Left: quiver field at t=1.0 (the learned target region).
+    ax_q = fig.add_subplot(1, 2, 1)
+    X, Y, U, V = velocity_field_on_grid(model if c_tensor is None else wrapped, 1.0, bounds, res)
+    X, Y = X.numpy(), Y.numpy()
+    U, V = U.numpy(), V.numpy()
+    mag = np.hypot(U, V)
+    ax_q.set_facecolor("#111111")
+    ax_q.quiver(X, Y, U, V, mag, cmap="plasma", alpha=0.4, zorder=1)
+    z_np = z_final.numpy()
+    ax_q.scatter(z_np[:, 0], z_np[:, 1], s=20, c="white", zorder=2)
+    ax_q.set_xlim(bounds[0], bounds[1])
+    ax_q.set_ylim(bounds[2], bounds[3])
+    ax_q.set_aspect("equal")
+    title_str = f"Latent field  (class {class_label})" if class_label is not None else "Latent field"
+    ax_q.set_title(title_str, color="white")
+    ax_q.tick_params(colors="white")
+    for sp in ax_q.spines.values():
+        sp.set_edgecolor("#444444")
+
+    # Right: grid of decoded images.
+    ax_d = fig.add_subplot(1, 2, 2)
+    ax_d.set_facecolor("#111111")
+    ax_d.axis("off")
+    imgs_np = decoded.squeeze(1).numpy()   # [n_show, 28, 28]
+    canvas = np.zeros((grid_side * 28, grid_side * 28))
+    for idx in range(n_show):
+        r, c = divmod(idx, grid_side)
+        canvas[r * 28:(r + 1) * 28, c * 28:(c + 1) * 28] = imgs_np[idx]
+    ax_d.imshow(canvas, cmap="gray", vmin=0, vmax=1)
+    ax_d.set_title("Decoded digits", color="white")
+
+    fig.tight_layout()
+    return fig
 
 
 def compare_solvers_figure(
