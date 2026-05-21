@@ -22,7 +22,7 @@ import torch
 from torch import Tensor
 
 from src.model import VelocityMLP
-from src.solvers import euler_integrate, velocity_field_on_grid
+from src.solvers import euler_integrate, rk4_integrate, velocity_field_on_grid
 
 
 def render_static_quiver(
@@ -199,3 +199,64 @@ def animate_flow(
     plt.close(fig)
 
     return os.path.abspath(out_path)
+
+
+def compare_solvers_figure(
+    model: VelocityMLP,
+    x0: Tensor,
+    n_steps: int = 20,
+    bounds: tuple[float, float, float, float] = (-3.0, 3.0, -3.0, 3.0),
+    gt_steps: int = 500,
+) -> plt.Figure:
+    """Side-by-side comparison of Euler vs RK4 at the same (low) step count.
+
+    A high-step Euler run (gt_steps) serves as the ground truth. Each panel
+    shows the final particle positions and the mean endpoint L2 error vs that
+    reference, making the higher-order accuracy of RK4 tangible at few steps.
+
+    Args:
+        model:    Trained VelocityMLP.
+        x0:       [B, 2] shared initial noise — both solvers start here.
+        n_steps:  Steps for the cheap Euler and RK4 runs (keep low, e.g. 5–30).
+        bounds:   Plot region.
+        gt_steps: Steps for the reference trajectory (should be >> n_steps).
+
+    Returns:
+        A 1×3 matplotlib Figure: Euler | RK4 | Ground truth (gt_steps Euler).
+    """
+    # Ground truth: dense Euler integration treated as reference.
+    gt = euler_integrate(model, x0, n_steps=gt_steps)[-1].numpy()   # [B, 2]
+    euler_end = euler_integrate(model, x0, n_steps=n_steps)[-1].numpy()
+    rk4_end   = rk4_integrate(model, x0, n_steps=n_steps)[-1].numpy()
+
+    # Mean per-particle L2 distance from ground truth.
+    err_euler = float(np.linalg.norm(euler_end - gt, axis=1).mean())
+    err_rk4   = float(np.linalg.norm(rk4_end   - gt, axis=1).mean())
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
+    fig.patch.set_facecolor("#111111")
+
+    panels = [
+        (euler_end, f"Euler  ({n_steps} steps)\nmean err = {err_euler:.4f}", "#6ab0f5"),
+        (rk4_end,   f"RK4    ({n_steps} steps)\nmean err = {err_rk4:.4f}",   "#f5a623"),
+        (gt,        f"Reference\n(Euler {gt_steps} steps)",                    "#aaffaa"),
+    ]
+
+    x_min, x_max, y_min, y_max = bounds
+    for ax, (pts, title, color) in zip(axes, panels):
+        ax.set_facecolor("#111111")
+        ax.scatter(pts[:, 0], pts[:, 1], s=8, c=color, alpha=0.7)
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_aspect("equal")
+        ax.set_title(title, color="white", fontsize=10)
+        ax.tick_params(colors="white")
+        for sp in ax.spines.values():
+            sp.set_edgecolor("#444444")
+
+    fig.suptitle(
+        f"Solver comparison — {n_steps} steps  |  RK4 err / Euler err = {err_rk4/max(err_euler,1e-9):.3f}",
+        color="white", fontsize=11, y=1.02,
+    )
+    fig.tight_layout()
+    return fig

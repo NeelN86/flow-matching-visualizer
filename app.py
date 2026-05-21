@@ -3,7 +3,8 @@
 Single-page layout:
   Left column  — training controls + live loss curve
   Right column — velocity field (scrub t with slider)
-  Bottom row   — animation controls + GIF output
+  Middle row   — animation controls + GIF output
+  Bottom row   — Euler vs RK4 solver comparison (stretch goal)
 
 A single in-memory model handle is updated each time the user clicks Train.
 All heavy work (training, animation pre-computation) runs in the Gradio
@@ -25,7 +26,7 @@ import gradio as gr
 from src.data import TARGETS, sample_source
 from src.interpolation import flow_matching_loss
 from src.model import VelocityMLP
-from src.visualize import animate_flow, render_static_quiver
+from src.visualize import animate_flow, compare_solvers_figure, render_static_quiver
 
 # ---------------------------------------------------------------------------
 # Shared mutable model state (single-user demo — no locking needed).
@@ -121,6 +122,16 @@ def run_animate(n_particles: int, n_steps: int, trail_len: int) -> str | None:
     return out
 
 
+def run_solver_comparison(n_particles: int, n_steps: int) -> plt.Figure | None:
+    """Run Euler and RK4 at n_steps and return a side-by-side comparison figure."""
+    if _state["model"] is None:
+        gr.Warning("Train the model first.")
+        return None
+    x0 = sample_source(int(n_particles))
+    fig = compare_solvers_figure(_state["model"], x0, n_steps=int(n_steps))
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
@@ -155,7 +166,7 @@ with gr.Blocks(title="Flow Matching Visualizer") as demo:
             t_slider = gr.Slider(0.0, 1.0, value=0.5, step=0.01, label="t")
             quiver_plot = gr.Plot(label="Quiver field at t")
 
-    # ── Bottom: animation ─────────────────────────────────────────────────
+    # ── Animation ─────────────────────────────────────────────────────────
     gr.Markdown("### Animation")
     with gr.Row():
         np_sl = gr.Slider(50, 300, value=150, step=50, label="Particles")
@@ -163,6 +174,18 @@ with gr.Blocks(title="Flow Matching Visualizer") as demo:
         tl_sl = gr.Slider(5, 30, value=15, step=5, label="Trail length (frames)")
     anim_btn = gr.Button("Animate + export GIF")
     gif_out = gr.Image(label="Flow animation", type="filepath")
+
+    # ── Solver comparison (stretch goal) ──────────────────────────────────
+    gr.Markdown(
+        "### Euler vs RK4 — solver comparison\n"
+        "Use a *low* step count to amplify discretisation error and see RK4's "
+        "4th-order accuracy advantage over Euler's 2nd-order."
+    )
+    with gr.Row():
+        cmp_particles_sl = gr.Slider(100, 500, value=300, step=100, label="Particles")
+        cmp_steps_sl = gr.Slider(5, 50, value=15, step=5, label="ODE steps (keep low)")
+    cmp_btn = gr.Button("Compare solvers")
+    cmp_plot = gr.Plot(label="Euler | RK4 | Ground truth (500-step Euler)")
 
     # ── Wiring ────────────────────────────────────────────────────────────
     train_btn.click(
@@ -179,6 +202,11 @@ with gr.Blocks(title="Flow Matching Visualizer") as demo:
         run_animate,
         inputs=[np_sl, ns_sl, tl_sl],
         outputs=[gif_out],
+    )
+    cmp_btn.click(
+        run_solver_comparison,
+        inputs=[cmp_particles_sl, cmp_steps_sl],
+        outputs=[cmp_plot],
     )
 
 if __name__ == "__main__":
