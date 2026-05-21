@@ -75,6 +75,9 @@ TARGETS: dict[str, Callable[[int], Tensor]] = {
 
 
 def make_mnist_class_sampler(vae: "VAE", digit: int, data_root: str = "data") -> Callable[[int], Tensor]:  # type: ignore[name-defined]
+    # Windows / corporate SSL workaround for MNIST download (mirrors fix in src/vae.py).
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
     """Pre-encode all MNIST training images for a given digit into 2D latents.
 
     Returns a sampler f(n) -> Tensor[n, 2] that draws random rows from

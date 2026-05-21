@@ -10,6 +10,7 @@ latent coordinates without PCA approximation.
 from __future__ import annotations
 
 import os
+import ssl
 from typing import Callable
 
 import torch
@@ -18,6 +19,10 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+# Windows / corporate-network SSL workaround for MNIST download.
+_ssl_default = ssl._create_default_https_context
+ssl._create_default_https_context = ssl._create_unverified_context
 
 
 class MNISTEncoder(nn.Module):

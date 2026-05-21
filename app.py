@@ -251,7 +251,7 @@ def update_mnist_quiver(t: float) -> plt.Figure | None:
             self._m = m
             self._c = c
         def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-            return self._m(x, t, self._c.expand(x.shape[0]))
+            return self._m(x, t, self._c[0:1].expand(x.shape[0]))
 
     wrapped = _Bound(_state["mnist_model"], c)
     return render_static_quiver(wrapped, t=float(t), bounds=(-4, 4, -4, 4), res=20)
@@ -288,7 +288,7 @@ def run_mnist_animate(n_particles: int, n_steps: int, trail_len: int) -> str | N
             self._m = m
             self._c = c
         def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-            return self._m(x, t, self._c.expand(x.shape[0]))
+            return self._m(x, t, self._c[0:1].expand(x.shape[0]))
 
     wrapped = _Bound(_state["mnist_model"], c_tens)
     return animate_flow(

@@ -248,7 +248,8 @@ def render_decoded_panel(
                 self._m = m
                 self._c = c
             def forward(self, x: Tensor, t: Tensor) -> Tensor:
-                return self._m(x, t, self._c[:x.shape[0]])
+                c = self._c[0:1].expand(x.shape[0])
+                return self._m(x, t, c)
         wrapped = CWrapper(model, c_tensor)
     else:
         wrapped = model  # type: ignore[assignment]
