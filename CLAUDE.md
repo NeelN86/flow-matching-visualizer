@@ -58,3 +58,19 @@ data.py → interpolation.py → model.py
 ### Training performance
 
 5 000 steps, batch 256, CPU: ~15 seconds. No GPU needed. Distributions are sampled on-the-fly each step (infinite dataset, no DataLoader).
+
+## Next Session Goal
+Extend the toy visualizer into a class-conditioned image generator using 
+a 2D VAE latent space trained on MNIST.
+
+### Plan
+1. Train a VAE with a 2D bottleneck on MNIST
+2. Visualize the latent space — check digit classes cluster cleanly
+3. Add class embedding to VelocityMLP input: [x, y, t, class_emb] -> [vx, vy]
+4. Retrain flow matching in 2D latent space with class conditioning
+5. Two-panel visualization: quiver field (left) + decoded image (right)
+6. Class selector in Gradio — switching class reorganizes the velocity field live
+
+### Key Design Decision
+Work in 2D latent space not pixel space — keeps velocity field visualization 
+exact rather than PCA-approximated.
